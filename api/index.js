@@ -45,7 +45,7 @@ module.exports = async (req, res) => {
         
         // Validate required parameters
         if (!url) {
-            return res.status(400).json({ error: 'URL parameter is required' });
+            return res.send('URL parameter is required');
         }
 
         // Set default values
