@@ -4,8 +4,8 @@ const axios = require('axios');
 // Configuration
 const config = {
     image: {
-        maxWidth: 1920,
-        maxHeight: 1080,
+        maxWidth: 16383,  // Maximum allowed dimension
+        maxHeight: 16383, // Maximum allowed dimension
         defaultQuality: 80,
         defaultFormat: 'webp',
         timeout: 10000
@@ -116,47 +116,103 @@ module.exports = async (req, res) => {
         // Create Sharp instance from the image buffer
         let sharpInstance = sharp(response.data);
 
+        // Get metadata to check original dimensions
+        const metadata = await sharpInstance.metadata();
+        const originalWidth = metadata.width;
+        const originalHeight = metadata.height;
+
+        // Determine if we need to resize
+        let needsResize = false;
+        let resizeOptions = {};
+
+        // Check if original image exceeds 16383x16383
+        if (originalWidth > 16383 || originalHeight > 16383) {
+            needsResize = true;
+            
+            // Calculate dimensions to fit within 16383x16383 while maintaining aspect ratio
+            const aspectRatio = originalWidth / originalHeight;
+            let newWidth = originalWidth;
+            let newHeight = originalHeight;
+
+            if (originalWidth > 16383) {
+                newWidth = 16383;
+                newHeight = Math.round(newWidth / aspectRatio);
+            }
+
+            if (newHeight > 16383) {
+                newHeight = 16383;
+                newWidth = Math.round(newHeight * aspectRatio);
+            }
+
+            resizeOptions = {
+                width: newWidth,
+                height: newHeight,
+                fit: 'inside',
+                withoutEnlargement: true,
+                kernel: 'lanczos3'
+            };
+        }
+        // If user specified dimensions and they're smaller than original, use those
+        else if (targetWidth || targetHeight) {
+            needsResize = true;
+            resizeOptions = {
+                width: targetWidth,
+                height: targetHeight,
+                fit: 'inside',
+                withoutEnlargement: true,
+                kernel: 'lanczos3'
+            };
+        }
+
         // Apply transformations
-        const transformations = sharpInstance.resize(targetWidth, targetHeight, {
-            fit: 'inside',
-            withoutEnlargement: true,
-            kernel: 'lanczos3'
-        });
+        if (needsResize) {
+            sharpInstance = sharpInstance.resize(resizeOptions);
+        }
 
         // Apply grayscale if requested
         if (useGrayscale) {
-            transformations.grayscale();
+            sharpInstance = sharpInstance.grayscale();
         }
 
-        // Set format and quality
+        // Set format and quality with fast processing priority
         let formatOptions = { quality: targetQuality };
         if (targetFormat === 'jpeg') {
-            formatOptions.progressive = true;
-            formatOptions.mozjpeg = true;
+            formatOptions.progressive = false;  // Disable progressive encoding for speed
+            formatOptions.mozjpeg = false;      // Disable mozjpeg for faster processing
+            formatOptions.trellisQuantisation = false;  // Disable trellis quantization
+            formatOptions.optimiseScans = false;        // Disable scan optimization
+            formatOptions.optimiseCoding = false;       // Disable Huffman table optimization
         } else if (targetFormat === 'webp') {
             formatOptions.lossless = false;
-            formatOptions.effort = 1;
+            formatOptions.effort = 0;           // Minimum effort for fastest processing
+            formatOptions.alphaQuality = 80;     // Reduced alpha quality for speed
+            formatOptions.smartSubsample = false; // Disable smart subsampling
         } else if (targetFormat === 'png') {
-            formatOptions.compressionLevel = 9;
-            formatOptions.progressive = true;
+            formatOptions.compressionLevel = 1;  // Fastest compression level
+            formatOptions.progressive = false;   // Disable progressive encoding
+            formatOptions.adaptiveFiltering = false; // Disable adaptive filtering
+            formatOptions.palette = false;       // Disable palette conversion
         }
 
-        transformations.toFormat(targetFormat, formatOptions);
+        sharpInstance = sharpInstance.toFormat(targetFormat, formatOptions);
 
-        // Get image metadata for response headers
-        const metadata = await transformations.metadata();
+        // Get final metadata for response headers
+        const finalMetadata = await sharpInstance.metadata();
 
         // Set appropriate headers
         res.setHeader('Content-Type', `image/${targetFormat}`);
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
         res.setHeader('X-Proxy-By', 'ImageCompressionProxy/1.0');
         res.setHeader('X-Original-Size', contentLength);
-        res.setHeader('X-Processed-Width', metadata.width);
-        res.setHeader('X-Processed-Height', metadata.height);
-        res.setHeader('X-Processed-Format', metadata.format);
+        res.setHeader('X-Original-Width', originalWidth);
+        res.setHeader('X-Original-Height', originalHeight);
+        res.setHeader('X-Processed-Width', finalMetadata.width);
+        res.setHeader('X-Processed-Height', finalMetadata.height);
+        res.setHeader('X-Processed-Format', finalMetadata.format);
+        res.setHeader('X-Resize-Applied', needsResize ? 'true' : 'false');
 
         // Get the processed image buffer
-        const processedImage = await transformations.toBuffer();
+        const processedImage = await sharpInstance.toBuffer();
 
         // Send the processed image
         res.send(processedImage);
