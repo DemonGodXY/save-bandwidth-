@@ -135,7 +135,7 @@ module.exports = async (req, res) => {
             formatOptions.mozjpeg = true;
         } else if (targetFormat === 'webp') {
             formatOptions.lossless = false;
-            formatOptions.effort = 6;
+            formatOptions.effort = 1;
         } else if (targetFormat === 'png') {
             formatOptions.compressionLevel = 9;
             formatOptions.progressive = true;
