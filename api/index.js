@@ -185,8 +185,8 @@ module.exports = async (req, res) => {
         } else if (targetFormat === 'webp') {
             formatOptions.lossless = false;
             formatOptions.effort = 0;           // Minimum effort for fastest processing
-            formatOptions.alphaQuality = 80;     // Reduced alpha quality for speed
-            formatOptions.smartSubsample = false; // Disable smart subsampling
+          //  formatOptions.alphaQuality = 80;     // Reduced alpha quality for speed
+           // formatOptions.smartSubsample = false; // Disable smart subsampling
         } else if (targetFormat === 'png') {
             formatOptions.compressionLevel = 1;  // Fastest compression level
             formatOptions.progressive = false;   // Disable progressive encoding
