@@ -2,7 +2,7 @@
   "name": "image-compression-proxy",
   "version": "1.0.0",
   "description": "Image compression proxy service for Vercel deployment",
-  "main": "api/index.js",
+  "main": "api/index1.js",
   "scripts": {
     "dev": "vercel dev",
     "deploy": "vercel --prod"
