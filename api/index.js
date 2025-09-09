@@ -51,10 +51,6 @@ module.exports = async (req, res) => {
     const contentType = response.headers.get("content-type") || "";
     const contentLength = Number(response.headers.get("content-length")) || 0;
 
-    if (!contentType.startsWith("image/")) {
-      res.statusCode = 400;
-      return res.end(JSON.stringify({ error: "Not a valid image" }));
-    }
 
     if (contentLength > config.security.maxFileSize) {
       res.statusCode = 413;
