@@ -1,7 +1,5 @@
 const sharp = require("sharp");
-const https = require("https");
-const http = require("http");
-const { URL } = require("url");
+const axios = require("axios");
 
 const config = {
   image: {
@@ -17,133 +15,72 @@ const config = {
 };
 
 module.exports = async (req, res) => {
-  if (req.method !== "GET") {
-    res.statusCode = 405;
-    res.end(JSON.stringify({ error: "Method not allowed" }));
-    return;
-  }
-
-  const { url, quality, grayscale, format } = req.query;
-  if (!url) {
-    res.statusCode = 400;
-    res.end(JSON.stringify({ error: "URL parameter is required" }));
-    return;
-  }
-
-  const targetQuality = parseInt(quality, 10) || config.image.defaultQuality;
-  let targetFormat = ["jpeg", "png", "webp", "avif"].includes(format)
-    ? format
-    : config.image.defaultFormat;
-
   try {
-    const imageUrl = new URL(url);
-    const client = imageUrl.protocol === "https:" ? https : http;
+    if (req.method !== "GET") {
+      return res.status(405).json({ error: "Method not allowed" });
+    }
 
-    const request = client.get(
-      imageUrl,
-      {
-        timeout: config.image.timeout,
-        headers: { "User-Agent": "ImageProxy/stream" },
-      },
-      (response) => {
-        const contentType = response.headers["content-type"] || "";
-        const contentLength = Number(response.headers["content-length"]) || 0;
+    const { url, width, height, quality, grayscale, format } = req.query;
+    if (!url) return res.status(400).json({ error: "URL parameter is required" });
 
+    // ✅ Parse options
+    const targetWidth = parseInt(width, 10) || null;
+    const targetHeight = parseInt(height, 10) || null;
+    const targetQuality = parseInt(quality, 10) || config.image.defaultQuality;
+    let targetFormat = ["jpeg", "png", "webp", "avif"].includes(format)
+      ? format
+      : config.image.defaultFormat;
 
-        if (contentLength > config.security.maxFileSize) {
-          res.statusCode = 413;
-          res.end(
-            JSON.stringify({
-              error: `Image too large (max ${
-                config.security.maxFileSize / 1024 / 1024
-              } MB)`,
-            })
-          );
-          response.resume();
-          return;
-        }
-
-        // Create sharp instance from stream
-        const sharpStream = sharp();
-
-        response.pipe(sharpStream);
-
-        (async () => {
-          try {
-            const metadata = await sharpStream.metadata();
-
-            let transformer = sharp();
-
-            // Resize only if larger than max safe size
-            if (
-              metadata.width > config.image.maxWidth ||
-              metadata.height > config.image.maxHeight
-            ) {
-              transformer = transformer.resize({
-                width: config.image.maxWidth,
-                height: config.image.maxHeight,
-                fit: "inside",
-                withoutEnlargement: true,
-              });
-            }
-
-            if (grayscale === "true") transformer = transformer.grayscale();
-
-            const formatOptions = {
-              quality: targetQuality,
-              ...(targetFormat === "jpeg" && { mozjpeg: true }),
-              ...(targetFormat === "png" && { compressionLevel: 6 }),
-              ...(targetFormat === "webp" && { effort: 4, lossless: false }),
-            };
-
-            transformer = transformer.toFormat(targetFormat, formatOptions);
-
-            // Headers
-            res.setHeader("Content-Type", `image/${targetFormat}`);
-            res.setHeader(
-              "Cache-Control",
-              "public, max-age=31536000, immutable"
-            );
-            res.setHeader(
-              "Content-Disposition",
-              `inline; filename="processed.${targetFormat}"`
-            );
-            res.setHeader("X-Proxy-By", "FastImageProxy-Stream");
-            res.setHeader("X-Original-Width", metadata.width);
-            res.setHeader("X-Original-Height", metadata.height);
-            res.setHeader(
-              "X-Resize-Applied",
-              metadata.width > config.image.maxWidth ||
-                metadata.height > config.image.maxHeight
-                ? "true"
-                : "false"
-            );
-
-            // Re-pipe original stream into transformer → client
-            response.pipe(sharp().resize()); // dummy fix
-          } catch (metaErr) {
-            console.error("Metadata error:", metaErr.message);
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: "Invalid image" }));
-          }
-        })();
-      }
-    );
-
-    request.on("error", (err) => {
-      console.error("Request error:", err.message);
-      res.statusCode = 502;
-      res.end(JSON.stringify({ error: "Image fetch failed" }));
+    // 📥 Fetch image as buffer
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: config.image.timeout,
+      maxRedirects: 5,
+      headers: { "User-Agent": "ImageProxy/fast", Accept: "image/*" },
     });
 
-    request.setTimeout(config.image.timeout, () => {
-      request.abort();
-      res.statusCode = 408;
-      res.end(JSON.stringify({ error: "Request timeout" }));
-    });
-  } catch (err) {
-    console.error("Processing error:", err.message);
-    res.statusCode = 500;
-    res.end(JSON.stringify({ error: "Processing failed" }));
+    const contentType = response.headers["content-type"] || "";
+    const contentLength = Number(response.headers["content-length"]) || response.data.length;
+    if (!contentType.startsWith("image/"))
+      return res.status(400).json({ error: "Not a valid image" });
+    if (contentLength > config.security.maxFileSize)
+      return res.status(413).json({ error: `Image too large (max ${config.security.maxFileSize / 1024 / 1024} MB)` });
+
+    // 🚀 Process with sharp
+    let processed = sharp(response.data)
+      .resize({
+        width: targetWidth,
+        height: targetHeight,
+        fit: "inside",
+        withoutEnlargement: true,
+      });
+
+    if (grayscale === "true") processed = processed.grayscale();
+
+    const formatOptions = {
+      quality: targetQuality,
+      ...(targetFormat === "jpeg" && { mozjpeg: true }),
+      ...(targetFormat === "png" && { compressionLevel: 6 }),
+      ...(targetFormat === "webp" && { effort: 4, lossless: false }),
+    };
+
+    const outputBuffer = await processed.toFormat(targetFormat, formatOptions).toBuffer();
+
+    // 🔥 Send result
+    res.setHeader("Content-Type", `image/${targetFormat}`);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("Content-Disposition", `inline; filename="processed.${targetFormat}"`);
+    res.setHeader("X-Proxy-By", "FastImageProxy");
+
+    res.end(outputBuffer);
+
+  } catch (error) {
+    console.error("Error:", error.message);
+    if (["ECONNABORTED", "ETIMEDOUT"].includes(error.code))
+      return res.status(408).json({ error: "Request timeout" });
+    if (["ENOTFOUND", "ECONNREFUSED"].includes(error.code))
+      return res.status(502).json({ error: "Failed to connect to image server" });
+
+    res.status(500).json({ error: "Image processing failed", detail: error.message });
   }
 };
