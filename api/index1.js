@@ -19,15 +19,11 @@ const config = {
 };
 
 module.exports = async (req, res) => {
-  if (req.method !== "GET") {
-    res.statusCode = 405;
-    return res.end(JSON.stringify({ error: "Method not allowed" }));
-  }
-
+  
   const { url, quality, grayscale, format } = req.query;
   if (!url) {
-    res.statusCode = 400;
-    return res.end(JSON.stringify({ error: "URL parameter is required" }));
+    
+    return res.send("URL parameter is required");
   }
 
   const targetQuality = parseInt(quality, 10) || config.image.defaultQuality;
