@@ -1,10 +1,10 @@
 // api/proxy.js
-// Deploy this in your Vercel project "api" folder
+// Serverless Bandwidth Hero-style proxy for Vercel (CJS)
 
-import axios from "axios";
-import sharp from "sharp";
+const axios = require("axios");
+const sharp = require("sharp");
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   try {
     const { url, quality, grayscale, format } = req.query;
 
@@ -21,11 +21,12 @@ export default async function handler(req, res) {
     // Auto-detect if WebP supported
     const acceptHeader = req.headers["accept"] || "";
     const clientSupportsWebP = acceptHeader.includes("image/webp");
+
     if (!outFormat) {
       outFormat = clientSupportsWebP ? "webp" : "jpeg";
     }
 
-    // Fetch source image as a stream
+    // Fetch source image as stream
     const response = await axios.get(url, { responseType: "stream" });
 
     // Build transform pipeline
@@ -33,7 +34,7 @@ export default async function handler(req, res) {
     if (makeGray) transformer = transformer.grayscale();
 
     if (outFormat === "webp") {
-      transformer = transformer.webp({ quality: q, effort: 1 });
+      transformer = transformer.webp({ quality: q, effort: 1 }); // fast WebP
       res.setHeader("Content-Type", "image/webp");
     } else if (outFormat === "png") {
       transformer = transformer.png({ quality: q, compressionLevel: 9 });
@@ -43,15 +44,15 @@ export default async function handler(req, res) {
       res.setHeader("Content-Type", "image/jpeg");
     }
 
-    // Stream pipeline: remote -> sharp -> client
+    // Pipe source -> sharp -> response
     response.data.pipe(transformer).pipe(res);
 
-    response.data.on("error", err => {
+    response.data.on("error", (err) => {
       console.error("Source stream error:", err.message);
       if (!res.headersSent) res.status(500).send("Source stream error");
       else res.end();
     });
-    transformer.on("error", err => {
+    transformer.on("error", (err) => {
       console.error("Sharp transform error:", err.message);
       if (!res.headersSent) res.status(500).send("Transform error");
       else res.end();
@@ -61,4 +62,4 @@ export default async function handler(req, res) {
     console.error("Proxy error:", err.message);
     res.status(500).send("Proxy failed");
   }
-}
+};
