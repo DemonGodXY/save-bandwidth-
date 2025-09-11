@@ -9,7 +9,7 @@ module.exports = async function handler(req, res) {
     const { url, quality, grayscale, format } = req.query;
 
     if (!url) {
-      res.status(400).send("Missing required ?url= parameter");
+      res.send("Missing required ?url= parameter");
       return;
     }
 
