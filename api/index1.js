@@ -1,7 +1,7 @@
-import axios from "axios";
-import sharp from "sharp";
+const axios = require("axios");
+const sharp = require("sharp");
 
-export default async function handler(req, res) {
+module.exports = async (req, res) => {
   const { url, quality = "60" } = req.query;
 
   if (!url) {
@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Fetch the image as an array buffer
+    // Fetch the image as raw data
     const response = await axios.get(url, { responseType: "arraybuffer" });
 
     // Compress with Sharp
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
       .jpeg({ quality: parseInt(quality, 10) })
       .toBuffer();
 
-    // Send back compressed image
+    // Send back the compressed image
     res.setHeader("Content-Type", "image/jpeg");
     res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     res.send(compressed);
@@ -26,4 +26,4 @@ export default async function handler(req, res) {
   } catch (err) {
     res.status(500).send("Compression failed: " + err.message);
   }
-}
+};
