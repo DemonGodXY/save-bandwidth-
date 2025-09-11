@@ -2,7 +2,7 @@ const axios = require("axios");
 const sharp = require("sharp");
 
 module.exports = async (req, res) => {
-  const { url, quality = "60" } = req.query;
+  const { url, format = "jpeg", quality = "60" } = req.query;
 
   if (!url) {
     res.status(400).send("Missing ?url= parameter");
@@ -10,16 +10,17 @@ module.exports = async (req, res) => {
   }
 
   try {
-    // Fetch the image as raw data
+    // Fetch the original image as raw bytes
     const response = await axios.get(url, { responseType: "arraybuffer" });
 
-    // Compress with Sharp
+    // Convert with sharp to requested format + quality
+    const fmt = format.toLowerCase(); // make sure it's lowercase
     const compressed = await sharp(response.data)
-      .jpeg({ quality: parseInt(quality, 10) })
+      .toFormat(fmt, { quality: parseInt(quality, 10) })
       .toBuffer();
 
-    // Send back the compressed image
-    res.setHeader("Content-Type", "image/jpeg");
+    // Send compressed image with correct headers
+    res.setHeader("Content-Type", `image/${fmt}`);
     res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     res.send(compressed);
 
