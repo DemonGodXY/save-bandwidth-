@@ -1,5 +1,5 @@
 // api/proxy.js
-// Serverless Bandwidth Hero-style image proxy for Vercel (CommonJS)
+// Serverless Image Proxy for Vercel (CJS + sharp.toFormat)
 
 const axios = require("axios");
 const sharp = require("sharp");
@@ -13,7 +13,7 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    // Decode URI (important for encoded URLs from query string)
+    // Decode safe URL
     try {
       url = decodeURIComponent(url);
     } catch (err) {
@@ -25,33 +25,44 @@ module.exports = async function handler(req, res) {
     const makeGray = grayscale === "true";
     let outFormat = format ? format.toLowerCase() : null;
 
-    // Auto-detect if WebP supported
+    // Auto-detect WebP support when format not forced
     const acceptHeader = req.headers["accept"] || "";
-    const clientSupportsWebP = acceptHeader.includes("image/webp");
-    if (!outFormat) outFormat = clientSupportsWebP ? "webp" : "jpeg";
+    if (!outFormat && acceptHeader.includes("image/webp")) {
+      outFormat = "webp";
+    }
+    if (!outFormat) outFormat = "jpeg"; // fallback
 
     // Fetch remote image as stream
     const response = await axios.get(url, { responseType: "stream" });
 
-    // Build pipe transformer
+    // Build transformer
     let transformer = sharp();
     if (makeGray) transformer = transformer.grayscale();
 
+    // Format-specific options
+    const formatOptions = {};
     if (outFormat === "webp") {
-      transformer = transformer.webp({ quality: q, effort: 1 }); // fast WebP
+      formatOptions.quality = q;
+      formatOptions.effort = 1; // fast WebP in serverless
       res.setHeader("Content-Type", "image/webp");
     } else if (outFormat === "png") {
-      transformer = transformer.png({ quality: q, compressionLevel: 9 });
+      formatOptions.quality = q; // not strictly used by sharp PNG, but accepted
+      formatOptions.compressionLevel = 9;
       res.setHeader("Content-Type", "image/png");
     } else {
-      transformer = transformer.jpeg({ quality: q, mozjpeg: true });
+      outFormat = "jpeg"; // normalize jpeg/jpg
+      formatOptions.quality = q;
+      formatOptions.mozjpeg = true;
       res.setHeader("Content-Type", "image/jpeg");
     }
 
-    // Pipe remote stream → sharp transform → response
+    // Use sharp.toFormat to unify
+    transformer = transformer.toFormat(outFormat, formatOptions);
+
+    // Pipe remote -> sharp -> client
     response.data.pipe(transformer).pipe(res);
 
-    // Handle upstream errors
+    // Error handling
     response.data.on("error", (err) => {
       console.error("Source error:", err.message);
       if (!res.headersSent) res.status(500).send("Source stream error");
@@ -62,7 +73,6 @@ module.exports = async function handler(req, res) {
       if (!res.headersSent) res.status(500).send("Transform error");
       else res.end();
     });
-
   } catch (err) {
     console.error("Proxy error:", err.message);
     res.status(500).send("Proxy failed");
